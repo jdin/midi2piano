@@ -6,6 +6,10 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [sveltekit(), tailwindcss()],
 
+	ssr: {
+		noExternal: ['@magenta/music/esm/core']
+	},
+
 	test: {
 		workspace: [
 			{

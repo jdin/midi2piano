@@ -1,1 +1,6 @@
-// place files you want to import through the `$lib` alias in this folder.
+
+export async function sleep(mls: number) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, mls);
+    });
+}

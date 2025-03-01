@@ -8,6 +8,16 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	interface Note {
+		name: string;
+		duration: number;
+		midi: number;
+		time: number;
+		velocity: number;
+	}
+	type InstrumentsChord = Record<number, Note[]>;
+	type Chords = Record<number, InstrumentsChord>;
 }
 
 export {};
