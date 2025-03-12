@@ -1,3 +1,3 @@
-# midi2chord
+# midi2piano
 
 TODO
