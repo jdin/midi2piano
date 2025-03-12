@@ -4,3 +4,6 @@
 	margin-inline: auto;
 	padding-inline: 2rem;
 }
+html, body {
+	@apply h-full w-full;
+}

@@ -1,196 +1,166 @@
 <script lang="ts">
-	import * as ToneMidi from '@tonejs/midi';
-	import * as Tone from 'tone';
-	import { onMount } from 'svelte';
+	import LeftIcon from '$lib/components/icons/LeftIcon.svelte';
+	import PauseIcon from '$lib/components/icons/PauseIcon.svelte';
+	import PlayIcon from '$lib/components/icons/PlayIcon.svelte';
+	import RightIcon from '$lib/components/icons/RightIcon.svelte';
 	import Piano from '$lib/components/Piano.svelte';
-	import type { ChangeEventHandler, KeyboardEventHandler } from 'svelte/elements';
+	import MidiPlayer, { type Event, type Player } from 'midi-player-js';
+	import { SplendidGrandPiano } from 'smplr';
+	import { onMount } from 'svelte';
+	import type { ChangeEventHandler, MouseEventHandler } from 'svelte/elements';
+
+	let currentIndex = $state(0);
+	let totalTicks = $state(0);
+	let isPlaying = $state(false);
+
+	let ticks = $state<Record<number, Event[]>>({});
+
+	let player: Player;
 
 	onMount(async () => {
-		init(await ToneMidi.Midi.fromUrl('/THE_CHRISTMAS_SONG.mid'));
-	});
-
-	let midi: ToneMidi.Midi | undefined = $state();
-	let chords: Chords | undefined = $state();
-	let times: number[] = $state([]);
-	let curTime: number | undefined = $state();
-
-	$effect(() => {
-		if (curTime !== undefined) {
-			const chord = chords?.[curTime];
-			if (chord) playChord(chord);
-		}
-	});
-
-	function init(_midi: ToneMidi.Midi) {
-		midi = _midi;
-		console.log(midi);
-		chords = midi.tracks.reduce<Chords>((trackAcc, track, index) => {
-			return track.notes.reduce<Chords>((acc, note) => {
-				const time = note.time;
-				const notes = acc?.[time]?.[index] || [];
-				return {
-					...acc,
-					[time]: { [index]: [...notes, note] }
-				};
-			}, trackAcc);
-		}, {});
-		times = Object.keys(chords || {})
-			.map(parseFloat)
-			.sort((a, b) => a - b);
-		curTime = times[0];
-	}
-
-	const synths: Tone.PolySynth<Tone.Synth<Tone.SynthOptions>>[] = [];
-	let highlight = $state<number[]>([]);
-	function playChord(chord: InstrumentsChord) {
-		while (synths.length) {
-			const synth = synths.shift();
-			synth?.disconnect();
-		}
-
-		highlight = Object.values(chord)
-			.flatMap((c) => c)
-			.map((n) => n.midi);
-
-		const now = Tone.now();
-		Object.values(chord).forEach((notes) => {
-			const synth = new Tone.PolySynth(Tone.Synth, {
-				envelope: {
-					attack: 0.02,
-					decay: 0.1,
-					sustain: 0.3,
-					release: 1
-				}
-			}).toDestination();
-			synths.push(synth);
-			//schedule all of the events
-			notes.forEach((note) => {
-				synth.triggerAttackRelease(note.name, note.duration, now, note.velocity);
-			});
+		const ac = new AudioContext();
+		const instrument = new SplendidGrandPiano(ac);
+		player = new MidiPlayer.Player((event: Event) => {
+			if (event.name == 'Note on') {
+				currentIndex = Object.keys(ticks).indexOf(String(event.tick));
+				instrument.start({
+					note: event.noteName!,
+					velocity: event.velocity
+				});
+			}
 		});
-	}
+	});
 
 	const onMidiSelect: ChangeEventHandler<HTMLInputElement> = async (e) => {
 		const file = e.currentTarget.files?.[0];
 		if (file) {
+			player?.stop();
 			const array = await file.arrayBuffer();
-			init(new ToneMidi.Midi(array));
+			player?.loadArrayBuffer(array);
+			totalTicks = player?.['totalTicks'];
+			ticks = player
+				?.getEvents()
+				.flatMap((e) => e)
+				.filter((n) => n.name === 'Note on')
+				.reduce((acc: Record<number, Event[]>, note) => {
+					const tick = note.tick;
+					const notes = acc[tick] || [];
+					return {
+						...acc,
+						[tick]: [...notes, note]
+					};
+				}, {});
 		}
 	};
 
-	function goBack() {
-		if (curTime != undefined && times) {
-			const index = times.indexOf(curTime);
-			if (index > 0) {
-				curTime = times[index - 1]
-			}
+	function toggle() {
+		if (isPlaying) {
+			isPlaying = false;
+			player?.stop();
+		} else {
+			isPlaying = true;
+			player?.skipToTick(indexToTick(currentIndex));
+			player?.play();
 		}
 	}
 
-	function goForward() {
-		if (curTime != undefined && times) {
-			const index = times.indexOf(curTime);
-			if (index < times.length - 2) {
-				curTime = times[index + 1]
-			}
-		}
+	function indexToTick(index: number): number {
+		return parseInt(Object.keys(ticks)[index]);
 	}
 
-	const onKeyDown: KeyboardEventHandler<Window> = e => {
-		switch(e.code) {
-			case "ArrowRight": {
-				goForward();
+	function chordLeft() {
+		if (currentIndex > 0) currentIndex--;
+	}
+
+	function chordRight() {
+		if (currentIndex < Object.keys(ticks).length - 1) currentIndex++;
+	}
+
+	let midi = $state<number[]>([]);
+	let tick = $state<number>(0);
+
+	$effect(() => {
+		tick = indexToTick(currentIndex);
+	});
+
+	$effect(() => {
+		const notes = ticks[tick];
+		midi = notes?.map((n) => n.noteNumber!);
+	});
+
+	function onKeyDown(e: KeyboardEvent) {
+		switch (e.key) {
+			case ' ':
+				toggle();
 				break;
-			}
-			case "ArrowLeft": {
-				goBack();
+			case 'ArrowLeft':
+				chordLeft();
 				break;
-			}
+			case 'ArrowRight':
+				chordRight();
+				break;
 		}
-	}
-
-
-	let playing: boolean = $state(false);
-	function toggleMidiPlay() {
-		if (!playing && midi) {
-			playing = true;
-            const now = Tone.now() + 0.5;
-            midi.tracks.forEach((track) => {
-                //create a synth for each track
-                const synth = new Tone.PolySynth(Tone.Synth, {
-                    envelope: {
-                        attack: 0.02,
-                        decay: 0.1,
-                        sustain: 0.3,
-                        release: 1,
-                    },
-                }).toDestination();
-                synths.push(synth);
-                //schedule all of the events
-                track.notes.forEach((note) => {
-                    synth.triggerAttackRelease(
-                        note.name,
-                        note.duration,
-                        note.time + now,
-                        note.velocity
-                    );
-                });
-            });
-        } else {
-			playing = false;
-            //dispose the synth and make a new one
-            while (synths.length) {
-                const synth = synths.shift();
-                synth?.disconnect();
-            }
-        }
 	}
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
 
 <section>
-	<h1>Tonejs</h1>
+	<title-header class="flex gap-8">
+		<input type="file" onchange={onMidiSelect} accept=".mid" />
+	</title-header>
 
-	<h2>Song: '{midi?.name}'</h2>
+	<Piano {midi} {tick} />
 
-	<p>Instruments:</p>
-	<ul>
-		{#each midi?.tracks || [] as track, index}
-			<li>{index} - {track.instrument.name}</li>
-		{/each}
-	</ul>
+	<info>
+		<span>{indexToTick(currentIndex) || '0' }</span>
+	</info>
 
-	<Piano {highlight} />
+	<input
+		id="default-range"
+		type="range"
+		bind:value={currentIndex}
+		max={Object.keys(ticks).length}
+		class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 dark:bg-gray-700"
+	/>
 
-	<div>
-		<input type="file" onchange={onMidiSelect} accept=".mid"/>
-	</div>
-
-	<button onclick={toggleMidiPlay}>{playing ? 'Stop' : 'Play'}</button>
-
-	<div>
-		<button onclick={goBack}>{'<<'}</button>
-		<select bind:value={curTime}>
-			<option value="" disabled>-- select chord --</option>
-			{#each times as time}
-				{@const instrChord = chords!![time as unknown as number]}
-				{@const instrs = Object.keys(instrChord)}
-				{@const midis = Object.values(instrChord)
-					.flatMap((c) => c)
-					.map((c) => c.midi)}
-				<option value={time}>{JSON.stringify(instrs)} - {JSON.stringify(midis)}</option>
-				<!-- <button onclick={() => playChord(instrChord)}>{time} - {JSON.stringify(instrs)} - {JSON.stringify(midis)}</button> -->
-			{/each}
-		</select>
-		<button onclick={goForward}>{'>>'}</button>
-	</div>
+	<toolbar>
+		<button disabled={totalTicks === 0} onclick={chordLeft}>
+			<LeftIcon />
+		</button>
+		<button disabled={totalTicks === 0} onclick={toggle}>
+			{#if isPlaying}
+				<PauseIcon />
+			{:else}
+				<PlayIcon />
+			{/if}
+		</button>
+		<button disabled={totalTicks === 0} onclick={chordRight}>
+			<RightIcon />
+		</button>
+	</toolbar>
 </section>
 
 <style lang="postcss">
 	@reference "tailwindcss/theme";
 
 	section {
-		@apply container mx-auto flex flex-col gap-3;
+		@apply container mx-auto flex h-full flex-col gap-3;
+	}
+
+	toolbar {
+		@apply flex w-full items-center justify-center gap-4;
+	}
+
+	button :global(svg) {
+		@apply h-10 w-10;
+	}
+
+	button:disabled :global(svg) {
+		@apply text-gray-200;
+	}
+
+	info {
+		@apply flex justify-center;
 	}
 </style>

@@ -1,43 +1,58 @@
 <script lang="ts">
-	const octaves = [1, 2, 3, 4, 5, 6, 7];
-	const notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-	const notesLength = notes.length * octaves.length;
+	import { midiToNote, toDiezNote, WHITE_PIANO_NOTES } from '$lib/util/piano';
+	import { untrack } from 'svelte';
 
 	interface Props {
-		highlight: number[];
+		midi?: number[];
+		tick?: number;
 	}
 
-	let { highlight = [] }: Props = $props();
+	let { midi = [], tick }: Props = $props();
 
-	// svelte-ignore non_reactive_update
-	let midiStart = 24;
+	let currentTick = $state<number>();
+	let chord = $state<string[]>([]);
+
+	$effect(() => {
+		if (typeof tick === 'number' && midi.length) {
+			const notes = midi.map(midiToNote);
+			if (tick == currentTick) {
+				// if (!chord.includes(note)) {
+				chord = untrack(() =>
+					notes.reduce((acc, note) => {
+						return acc.includes(note) ? acc : [...acc, note];
+					}, chord)
+				);
+				// }
+			} else {
+				currentTick = tick;
+				chord = [...notes];
+			}
+		}
+	});
+
 	let width = $state<number>();
 	let noteWidth = $state<number>(5);
 	$effect(() => {
 		if (width) {
-			noteWidth = width / notesLength;
+			noteWidth = width / WHITE_PIANO_NOTES.length;
 		}
 	});
+
 </script>
 
 <ul bind:clientWidth={width}>
-	{#each octaves as o}
-		{#each notes as n}
-			{@const note = n + o}
-			{@const midiWhite = midiStart++}
-			<li style:width="{noteWidth}px" class:selected={highlight.includes(midiWhite)}>
-				{#if n !== 'E' && n !== 'B'}
-					{@const blackKeyWidth = noteWidth / 1.5}
-					{@const midiBlack = midiStart++}
-					<span
-						style:width="{blackKeyWidth}px"
-						style:right="-{blackKeyWidth / 2 + 1}px"
-						class:selected={highlight.includes(midiBlack)}
-					></span>
-				{/if}
-				{note}
-			</li>
-		{/each}
+	{#each WHITE_PIANO_NOTES as note}
+		<li style:width="{noteWidth}px" class:selected={chord.includes(note)}>
+			{#if note[0] !== 'E' && note[0] !== 'B'}
+				{@const blackKeyWidth = noteWidth / 1.5}
+				<span
+					style:width="{blackKeyWidth}px"
+					style:right="-{blackKeyWidth / 2 + 1}px"
+					class:selected={chord.includes(toDiezNote(note))}
+				></span>
+			{/if}
+			{note}
+		</li>
 	{/each}
 </ul>
 
@@ -50,6 +65,7 @@
 
 	li {
 		@apply relative flex h-28 items-end justify-center border border-black text-center text-xs text-gray-500;
+		font-size: 7px;
 	}
 
 	li.selected {
@@ -57,7 +73,7 @@
 	}
 
 	li span {
-		@apply absolute top-0 h-18 bg-black z-10;
+		@apply absolute top-0 z-10 h-18 bg-black;
 	}
 
 	li span.selected {
